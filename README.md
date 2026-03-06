@@ -1,14 +1,30 @@
 # Whisper 字幕生成工具集
 
-一套完整的视频字幕生成、翻译、合并工具。
+一套完整的视频字幕生成、翻译、合并工具。支持命令行和 Web UI 两种使用方式。
 
 ---
 
-## 安装依赖
+## 快速开始
+
+### 安装依赖
 
 ```bash
-pip install faster-whisper deep-translator tqdm av transformers sentencepiece
+pip install -r requirements.txt
 ```
+
+或手动安装：
+
+```bash
+pip install faster-whisper deep-translator tqdm av transformers sentencepiece gradio==4.44.0 huggingface_hub==0.24.0 "httpx[socks]"
+```
+
+### 启动 Web UI（推荐）
+
+```bash
+python webui.py --share
+```
+
+访问地址：`http://127.0.0.1:7860`
 
 ---
 
@@ -16,11 +32,60 @@ pip install faster-whisper deep-translator tqdm av transformers sentencepiece
 
 | 脚本 | 说明 | 特点 |
 |------|------|------|
+| `webui.py` | **Web UI 界面** | 可视化操作，推荐使用 |
 | `whisper_subtitle.py` | 基础版 | 简单易用 |
 | `whisper_subtitle_gpu.py` | GPU加速版 | 速度快 |
 | `whisper_subtitle_turbo.py` | 极速版 | large-v3-turbo + 批量翻译 |
 | `whisper_subtitle_pro.py` | Pro版 | 本地翻译模型，无网络延迟 |
 | `merge_subtitle.py` | 字幕合并 | 将字幕硬编码到视频 |
+
+---
+
+## 0. webui.py（Web UI 界面 - 推荐）
+
+可视化操作界面，支持字幕生成、翻译、合并视频，实时显示翻译字幕。
+
+### 启动方式
+
+```bash
+# 本地访问
+python webui.py
+
+# 生成公网分享链接（推荐，解决代理问题）
+python webui.py --share
+
+# 指定端口
+python webui.py --port 8080
+```
+
+### 访问地址
+
+- 本地: `http://127.0.0.1:7860`
+- 公网: 启动时显示的 share 链接
+
+### 功能模块
+
+| Tab | 功能 | 说明 |
+|-----|------|------|
+| 📝 字幕生成 | 语音识别 + 翻译 | 实时显示识别/翻译结果 |
+| 🎬 字幕合并 | 硬编码字幕到视频 | 自定义字号、位置 |
+| ⚡ 一键处理 | 识别 + 翻译 + 合并 | 全自动处理 |
+
+### 参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--host` | 监听地址 | 127.0.0.1 |
+| `--port` | 端口 | 7860 |
+| `--share` | 生成公网分享链接 | 关闭 |
+
+### 常见问题
+
+如果遇到代理问题导致无法启动，使用：
+
+```bash
+python webui.py --share
+```
 
 ---
 
@@ -98,7 +163,7 @@ python whisper_subtitle_turbo.py "/path/to/video.mp4" -d /output/dir -t zh-CN --
 ### 完整命令示例
 
 ```bash
-python /Users/bryanchen/Documents/work/opencode/whisper_subtitle_turbo.py "/Users/bryanchen/Documents/图片/video.mp4" -d /Users/bryanchen/Documents/work/opencode -t zh-CN --batch-size 30 -p
+python whisper_subtitle_turbo.py "/path/to/video.mp4" -d /output/dir -t zh-CN --batch-size 30 -p
 ```
 
 ### 参数说明
@@ -135,7 +200,7 @@ python whisper_subtitle_pro.py "/path/to/video.mp4" -l ja -t zh-CN --translator 
 ### 完整命令示例
 
 ```bash
-python /Users/bryanchen/Documents/work/opencode/whisper_subtitle_pro.py "/Users/bryanchen/Documents/图片/video.mp4" -d /Users/bryanchen/Documents/work/opencode -l ja -t zh --translator local --batch-size 32 -p
+python whisper_subtitle_pro.py "/path/to/video.mp4" -d /output/dir -l ja -t zh --translator local --batch-size 32 -p
 ```
 
 ### 参数说明
@@ -181,7 +246,7 @@ python merge_subtitle.py "/path/to/video.mp4" -s "/path/to/subtitle.srt" --font-
 ### 完整命令示例
 
 ```bash
-python /Users/bryanchen/Documents/work/opencode/merge_subtitle.py "/Users/bryanchen/Documents/图片/video.mp4" -s "/Users/bryanchen/Documents/work/opencode/video.srt" -d /Users/bryanchen/Documents/work/opencode --font-size 24 --position bottom
+python merge_subtitle.py "/path/to/video.mp4" -s "/path/to/video.srt" -d /output/dir --font-size 24 --position bottom
 ```
 
 ### 参数说明
@@ -233,38 +298,92 @@ python /Users/bryanchen/Documents/work/opencode/merge_subtitle.py "/Users/bryanc
 ls -lh ~/.cache/huggingface/hub/
 ```
 
+清理模型缓存：
+
+```bash
+rm -rf ~/.cache/huggingface/hub/
+```
+
 ---
 
 ## 完整工作流示例
 
-### 1. 生成字幕
+### 方式一：使用 Web UI（推荐）
 
 ```bash
-python /Users/bryanchen/Documents/work/opencode/whisper_subtitle_pro.py "/Users/bryanchen/Documents/图片/video.mp4" -d /Users/bryanchen/Documents/work/opencode -l ja -t zh --translator local -p
+python webui.py --share
 ```
 
-### 2. 合并字幕到视频
+然后在浏览器中操作。
+
+### 方式二：使用命令行
+
+#### 1. 生成字幕
 
 ```bash
-python /Users/bryanchen/Documents/work/opencode/merge_subtitle.py "/Users/bryanchen/Documents/图片/video.mp4" -s "/Users/bryanchen/Documents/work/opencode/video.srt" -d /Users/bryanchen/Documents/work/opencode
+python whisper_subtitle_pro.py "/path/to/video.mp4" -d /output/dir -l ja -t zh --translator local -p
+```
+
+#### 2. 合并字幕到视频
+
+```bash
+python merge_subtitle.py "/path/to/video.mp4" -s "/output/dir/video.srt" -d /output/dir
 ```
 
 ---
 
 ## 常见问题
 
-### 1. 翻译速度慢
+### 1. Web UI 无法启动
+
+使用 `--share` 参数：
+
+```bash
+python webui.py --share
+```
+
+### 2. 翻译速度慢
 
 使用 `--translator local` 本地翻译模型，或增大 `--batch-size`。
 
-### 2. 识别不准确
+### 3. 识别不准确
 
 使用更大的模型：`-m large-v3` 或 `-m large-v3-turbo`。
 
-### 3. GPU 不支持 float16
+### 4. GPU 不支持 float16
 
-Mac M1/M2 用户使用 `--compute-type float32` 或 `int8`。
+Mac M1/M2/M3 用户使用 `--compute-type float32` 或 `int8`。
 
-### 4. 字幕位置不对
+### 5. 字幕位置不对
 
 调整 `--margin` 和 `--position` 参数。
+
+### 6. 依赖安装问题
+
+确保使用正确的版本：
+
+```bash
+pip install gradio==4.44.0 huggingface_hub==0.24.0 "httpx[socks]"
+```
+
+---
+
+## 项目结构
+
+```
+opencode/
+├── README.md                    # 使用文档
+├── requirements.txt             # 依赖列表
+├── webui.py                     # Web UI 界面
+├── whisper_subtitle.py          # 基础版
+├── whisper_subtitle_gpu.py      # GPU加速版
+├── whisper_subtitle_turbo.py    # 极速版
+├── whisper_subtitle_pro.py      # Pro版（本地翻译）
+└── merge_subtitle.py            # 字幕合并视频
+```
+
+---
+
+## License
+
+MIT License

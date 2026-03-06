@@ -1,0 +1,25 @@
+# Whisper 字幕生成工具依赖
+
+# 核心依赖
+faster-whisper>=1.0.0
+transformers>=4.40.0
+sentencepiece>=0.2.0
+
+# 翻译
+deep-translator>=1.11.0
+
+# 视频处理
+av>=11.0.0
+ffmpy>=0.4.0
+
+# Web UI（指定兼容版本）
+gradio==4.44.0
+huggingface_hub==0.24.0
+
+# 工具库
+tqdm>=4.65.0
+numpy>=1.24.0
+
+# 网络
+httpx[socks]>=0.27.0
+socksio>=1.0.0
