@@ -12,10 +12,10 @@
 pip install -r requirements.txt
 ```
 
-或手动安装：
+或手动安装（确保你已安装 FFmpeg）：
 
 ```bash
-pip install faster-whisper deep-translator tqdm av transformers sentencepiece gradio==4.44.0 huggingface_hub==0.24.0 "httpx[socks]"
+pip install faster-whisper deep-translator tqdm av transformers sentencepiece gradio==4.44.0 huggingface_hub==0.24.0 "httpx[socks]" mlx-whisper
 ```
 
 ### 启动 Web UI（推荐）
@@ -38,6 +38,7 @@ python webui.py --share
 | `whisper_subtitle_turbo.py` | 极速版 | large-v3-turbo + 批量翻译 |
 | `whisper_subtitle_pro.py` | Pro版 | 本地翻译模型，无网络延迟 |
 | `whisper_subtitle_hd.py` | HD高清版 | 包含音频清洗与高精度解码 |
+| `whisper_subtitle_mlx.py` | MLX极速版 | **Apple Silicon 专属**，速度最快 |
 | `merge_subtitle.py` | 字幕合并 | 将字幕硬编码到视频 |
 
 ---
@@ -253,7 +254,32 @@ python whisper_subtitle_hd.py "/path/to/video.mp4" --no-preprocess
 
 ---
 
-## 6. merge_subtitle.py（字幕合并视频）
+## 6. whisper_subtitle_mlx.py (MLX 极速版 - Apple Silicon 专属)
+
+为 Apple Silicon (M1/M2/M3) 芯片深度优化，利用 MLX 框架实现极致识别速度。
+
+### 使用方法
+
+```bash
+python whisper_subtitle_mlx.py "/path/to/video.mp4" -d /output/dir -l ja -t zh -p
+```
+
+### 完整命令示例
+
+```bash
+python /Users/bryanchen/Documents/work/opencode/whisper_subtitle_mlx.py "/Users/bryanchen/Documents/图片/SMA-692.mp4" -d /Users/bryanchen/Documents/work/opencode -l ja -t zh --translator local -p
+```
+
+### 参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-m, --model` | MLX 模型 | `mlx-community/whisper-large-v3-mlx` |
+| `--no-preprocess` | 禁用音频预处理 | 否 |
+
+---
+
+## 7. merge_subtitle.py（字幕合并视频）
 
 将 SRT 字幕硬编码到视频中，生成带字幕的新视频。
 
