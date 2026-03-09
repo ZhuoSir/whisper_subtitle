@@ -68,6 +68,36 @@ def get_video_duration(video_path):
         return 0
 
 
+def preprocess_audio(input_file, output_audio_file):
+    """音频预处理：降噪、响度标准化、16kHz 单声道"""
+    audio_filter = "afftdn=nf=-25,loudnorm=I=-16:TP=-1.5:LRA=11"
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        input_file,
+        "-vn",
+        "-af",
+        audio_filter,
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        output_audio_file,
+    ]
+    try:
+        process = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+        if process.returncode != 0:
+            return input_file
+        return output_audio_file
+    except:
+        return input_file
+
+
 def load_whisper_model(model_name, device="auto", compute_type="int8"):
     """加载 Whisper 模型"""
     global whisper_model, whisper_model_name
@@ -126,7 +156,9 @@ def translate_batch_local(texts, source_lang="ja", target_lang="zh"):
         texts, return_tensors="pt", padding=True, truncation=True, max_length=512
     )
     translated = model.generate(**inputs)
-    results = tokenizer.batch_decode(translated, skip_special_tokens=True)
+    results = tokenizer.batch_decode(
+        translated, skip_special_tokens=True, clean_up_tokenization_spaces=True
+    )
 
     return results
 
@@ -167,6 +199,8 @@ def generate_subtitle(
     translator_engine,
     model_choice,
     batch_size,
+    audio_enhance=False,
+    high_accuracy=False,
     progress=gr.Progress(),
 ):
     """生成字幕 - 流式输出"""
@@ -228,15 +262,42 @@ def generate_subtitle(
 
         # 步骤3: 开始识别
         output_lines.append("\n🎤 开始语音识别...")
+        if audio_enhance or high_accuracy:
+            output_lines.append(
+                f"⚙️ 增强选项: 降噪={'开启' if audio_enhance else '关闭'}, 高精度={'开启' if high_accuracy else '关闭'}"
+            )
         yield "\n".join(output_lines), None, ""
 
-        segments, info = model.transcribe(
-            video_path,
-            language=lang,
-            beam_size=1,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500),
-        )
+        audio_to_process = video_path
+        temp_audio = None
+        if audio_enhance:
+            output_lines.append("🎧 正在进行音频预处理 (降噪、音量标准化)...")
+            yield "\n".join(output_lines), None, ""
+            temp_audio = os.path.join(
+                tempfile.gettempdir(), f"whisper_clean_{int(time.time())}.wav"
+            )
+            processed_audio = preprocess_audio(video_path, temp_audio)
+            if processed_audio:
+                audio_to_process = processed_audio
+            else:
+                output_lines.append("⚠️ 音频预处理失败，使用原视频")
+                yield "\n".join(output_lines), None, ""
+
+        transcribe_kwargs = {
+            "language": lang,
+            "vad_filter": True,
+            "vad_parameters": dict(min_silence_duration_ms=500),
+        }
+
+        if high_accuracy:
+            transcribe_kwargs["beam_size"] = 5
+            transcribe_kwargs["temperature"] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+            transcribe_kwargs["condition_on_previous_text"] = False
+            transcribe_kwargs["vad_parameters"]["speech_pad_ms"] = 400
+        else:
+            transcribe_kwargs["beam_size"] = 1
+
+        segments, info = model.transcribe(audio_to_process, **transcribe_kwargs)
 
         detected_lang = info.language
         output_lines.append(
@@ -270,6 +331,13 @@ def generate_subtitle(
                 progress((segment.end / duration) * 0.6, desc="识别中...")
 
             yield "\n".join(output_lines), None, ""
+
+        # 清理临时文件
+        if temp_audio and os.path.exists(temp_audio):
+            try:
+                os.remove(temp_audio)
+            except:
+                pass
 
         output_lines.append("-" * 50)
         output_lines.append(f"✅ 识别完成，共 {len(segment_list)} 条字幕")
@@ -369,15 +437,20 @@ def merge_subtitle_video(
     style = f"FontSize={int(font_size)},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,MarginV={margin},Alignment={alignment}"
 
     # 转义字幕路径
-    subtitle_path_escaped = subtitle_path.replace("'", "'\\''")
-    subtitle_filter = f"subtitles='{subtitle_path_escaped}':force_style='{style}'"
+    subtitle_path_escaped = os.path.abspath(subtitle_path).replace("'", "'\\''")
+    # 添加 setpts=PTS-STARTPTS 修复时间戳问题，防止黑屏
+    subtitle_filter = (
+        f"setpts=PTS-STARTPTS,subtitles='{subtitle_path_escaped}':force_style='{style}'"
+    )
 
     # FFmpeg 命令
     cmd = [
         "ffmpeg",
         "-y",
+        "-fflags",
+        "+genpts",  # 重新生成时间戳
         "-i",
-        video_path,
+        os.path.abspath(video_path),
         "-vf",
         subtitle_filter,
         "-c:v",
@@ -386,8 +459,16 @@ def merge_subtitle_video(
         "medium",
         "-crf",
         str(int(quality)),
+        "-fps_mode",
+        "auto",  # 防止异常丢帧
         "-c:a",
-        "copy",
+        "aac",
+        "-b:a",
+        "128k",
+        "-map",
+        "0:v",
+        "-map",
+        "0:a?",
         output_path,
     ]
 
@@ -422,6 +503,8 @@ def one_click_process(
     translator_engine,
     model_choice,
     batch_size,
+    audio_enhance,
+    high_accuracy,
     font_size,
     position,
     quality,
@@ -452,6 +535,8 @@ def one_click_process(
         translator_engine,
         model_choice,
         batch_size,
+        audio_enhance,
+        high_accuracy,
         progress,
     ):
         output_lines_temp = output_lines.copy()
@@ -540,6 +625,13 @@ def create_ui():
                             value="large-v3-turbo (推荐)",
                             label="Whisper 模型",
                         )
+                        with gr.Row():
+                            audio_enhance1 = gr.Checkbox(
+                                label="音频增强降噪", value=False
+                            )
+                            high_accuracy1 = gr.Checkbox(
+                                label="高精度解码", value=False
+                            )
                         batch1 = gr.Slider(
                             minimum=10,
                             maximum=50,
@@ -572,6 +664,8 @@ def create_ui():
                         translator1,
                         model1,
                         batch1,
+                        audio_enhance1,
+                        high_accuracy1,
                     ],
                     outputs=[output1, srt_download1, srt_preview1],
                 )
@@ -659,6 +753,13 @@ def create_ui():
                             value="large-v3-turbo (推荐)",
                             label="Whisper 模型",
                         )
+                        with gr.Row():
+                            audio_enhance3 = gr.Checkbox(
+                                label="音频增强降噪", value=False
+                            )
+                            high_accuracy3 = gr.Checkbox(
+                                label="高精度解码", value=False
+                            )
                         batch3 = gr.Slider(
                             minimum=10,
                             maximum=50,
@@ -708,6 +809,8 @@ def create_ui():
                         translator3,
                         model3,
                         batch3,
+                        audio_enhance3,
+                        high_accuracy3,
                         font_size3,
                         position3,
                         quality3,

@@ -121,49 +121,26 @@ def merge_subtitle(
     return cmd
 
 
-def run_ffmpeg_with_progress(cmd, duration):
+def run_ffmpeg_with_progress(cmd, duration, verbose=False):
     """运行 FFmpeg 并显示进度"""
 
-    # 添加进度输出参数
-    cmd_with_progress = cmd[:-1] + ["-progress", "pipe:1", cmd[-1]]
+    if verbose:
+        # 详细模式：直接运行并显示 FFmpeg 输出
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+        )
+        if process.stdout:
+            for line in process.stdout:
+                print(line, end="")
+        return process.wait()
 
-    process = subprocess.Popen(
-        cmd_with_progress,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True,
-    )
-
-    print(f"\n合并进度:")
-
-    current_time = 0
-    while True:
-        line = process.stdout.readline()
-        if not line and process.poll() is not None:
-            break
-
-        if line.startswith("out_time_ms="):
-            try:
-                time_ms = int(line.split("=")[1])
-                current_time = time_ms / 1000000
-                if duration > 0:
-                    progress = min(100, (current_time / duration) * 100)
-                    bar_len = 40
-                    filled = int(bar_len * progress / 100)
-                    bar = "█" * filled + "░" * (bar_len - filled)
-                    print(
-                        f"\r[{bar}] {progress:.1f}% ({current_time:.1f}s / {duration:.1f}s)",
-                        end="",
-                        flush=True,
-                    )
-            except:
-                pass
-
-    print()  # 换行
-
-    # 等待进程结束
+    # 简单模式：只显示进度条
+    print(f"\n开始合并...")
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     process.wait()
-
     return process.returncode
 
 
@@ -216,6 +193,9 @@ def main():
         ],
         help="编码速度预设（默认: medium）",
     )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="显示 FFmpeg 详细输出"
+    )
 
     args = parser.parse_args()
 
@@ -259,8 +239,9 @@ def main():
     print(f"输出文件: {output_file}")
     print(f"{'=' * 60}")
 
-    # 构建 FFmpeg 命令
-    subtitle_path_escaped = args.subtitle.replace("'", "'\\''")
+    # 构建 FFmpeg 命令 - 简化路径处理
+    subtitle_path = os.path.abspath(args.subtitle)
+    input_path = os.path.abspath(args.input)
 
     # 字幕位置
     alignment = 2 if args.position == "bottom" else 6
@@ -268,12 +249,18 @@ def main():
     # 字幕样式
     style = f"FontSize={args.font_size},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline={args.outline},MarginV={args.margin},Alignment={alignment}"
 
-    subtitle_filter = f"subtitles='{subtitle_path_escaped}':force_style='{style}'"
+    # 添加 setpts=PTS-STARTPTS 修复时间戳问题，防止因为时间戳错误导致画面黑屏丢帧
+    subtitle_filter = (
+        f"setpts=PTS-STARTPTS,subtitles={subtitle_path}:force_style='{style}'"
+    )
 
     cmd = [
         "ffmpeg",
+        "-y",
+        "-fflags",
+        "+genpts",  # 重新生成时间戳
         "-i",
-        args.input,
+        input_path,
         "-vf",
         subtitle_filter,
         "-c:v",
@@ -282,9 +269,16 @@ def main():
         args.preset,
         "-crf",
         str(args.quality),
+        "-fps_mode",
+        "auto",  # 防止异常丢帧
         "-c:a",
-        "copy",
-        "-y",
+        "aac",
+        "-b:a",
+        "128k",
+        "-map",
+        "0:v",
+        "-map",
+        "0:a?",
         output_file,
     ]
 
@@ -292,7 +286,7 @@ def main():
     start_time = time.time()
 
     # 运行 FFmpeg
-    returncode = run_ffmpeg_with_progress(cmd, duration)
+    returncode = run_ffmpeg_with_progress(cmd, duration, args.verbose)
 
     if returncode == 0:
         elapsed = time.time() - start_time

@@ -2,6 +2,9 @@ import argparse
 import os
 import sys
 import time
+import subprocess
+import tempfile
+from pathlib import Path
 from faster_whisper import WhisperModel
 from tqdm import tqdm
 
@@ -26,13 +29,13 @@ def load_local_translator(source_lang="ja", target_lang="zh"):
 
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
-    # 语言对映射 - 使用实际存在的模型
+    # 语言对映射
     model_map = {
-        ("ja", "zh"): "larryvrh/mt5-translation-ja_zh",  # 日译中
-        ("ja", "en"): "Helsinki-NLP/opus-mt-ja-en",  # 日译英
-        ("en", "zh"): "Helsinki-NLP/opus-mt-en-zh",  # 英译中
-        ("en", "ja"): "Helsinki-NLP/opus-mt-en-jap",  # 英译日
-        ("zh", "en"): "Helsinki-NLP/opus-mt-zh-en",  # 中译英
+        ("ja", "zh"): "larryvrh/mt5-translation-ja_zh",
+        ("ja", "en"): "Helsinki-NLP/opus-mt-ja-en",
+        ("en", "zh"): "Helsinki-NLP/opus-mt-en-zh",
+        ("en", "ja"): "Helsinki-NLP/opus-mt-en-jap",
+        ("zh", "en"): "Helsinki-NLP/opus-mt-zh-en",
     }
 
     key = (source_lang, target_lang)
@@ -56,7 +59,6 @@ def translate_local(texts, source_lang="ja", target_lang="zh"):
     if model is None:
         return None
 
-    # 批量翻译
     inputs = tokenizer(
         texts, return_tensors="pt", padding=True, truncation=True, max_length=512
     )
@@ -84,7 +86,6 @@ def translate_google_batch(texts, target_lang="zh-CN", batch_size=20):
                 if len(parts) == len(batch):
                     results.extend([p.strip() for p in parts])
                 else:
-                    # 分割失败，逐条翻译
                     for text in batch:
                         try:
                             result = translator.translate(text)
@@ -92,7 +93,6 @@ def translate_google_batch(texts, target_lang="zh-CN", batch_size=20):
                         except:
                             results.append(text)
         except:
-            # 批量失败，逐条翻译
             for text in batch:
                 try:
                     result = translator.translate(text)
@@ -124,9 +124,55 @@ def get_video_duration(input_file):
         return None
 
 
+def preprocess_audio(input_file, output_audio_file):
+    """
+    预处理音频，让模型听得更清楚：
+    1. 提取音频
+    2. 降噪 (afftdn)
+    3. 音量标准化 (loudnorm)
+    4. 采样率 16kHz, 单声道
+    """
+    print(f"\n🎧 正在预处理音频 (降噪、人声提取、音量标准化)...")
+    start_time = time.time()
+
+    # afftdn: 傅里叶降噪
+    # loudnorm: 响度标准化 (解决声音忽大忽小)
+    audio_filter = "afftdn=nf=-25,loudnorm=I=-16:TP=-1.5:LRA=11"
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        input_file,
+        "-vn",  # 无视频
+        "-af",
+        audio_filter,
+        "-ac",
+        "1",  # 单声道
+        "-ar",
+        "16000",  # 16kHz 采样率
+        "-c:a",
+        "pcm_s16le",  # 无损 WAV 格式
+        output_audio_file,
+    ]
+
+    try:
+        process = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+        if process.returncode != 0:
+            print(f"音频预处理失败，将直接使用原视频: {process.stderr[-200:]}")
+            return input_file
+        print(f"音频清洗完成! 耗时: {time.time() - start_time:.1f}秒")
+        return output_audio_file
+    except Exception as e:
+        print(f"执行 FFmpeg 失败，将直接使用原视频: {e}")
+        return input_file
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Whisper 字幕生成 Pro 版（支持本地翻译）"
+        description="Whisper 字幕生成 HD 版（高清晰度、高精度版）"
     )
     parser.add_argument("input", help="视频或音频文件路径")
     parser.add_argument("-o", "--output", help="输出字幕文件路径")
@@ -140,8 +186,8 @@ def main():
     parser.add_argument(
         "-m",
         "--model",
-        default="deepdml/faster-whisper-large-v3-turbo-ct2",
-        help="Whisper 模型（默认: large-v3-turbo）",
+        default="large-v3",
+        help="Whisper 模型（默认: large-v3，最准确）",
     )
     parser.add_argument(
         "-l", "--language", default=None, help="识别语言: zh/en/ja（默认: 自动检测）"
@@ -163,9 +209,9 @@ def main():
     )
     parser.add_argument(
         "--compute-type",
-        default="int8",
+        default="float16",
         choices=["float16", "float32", "int8"],
-        help="计算类型（默认: int8）",
+        help="计算类型（默认: float16，精度高）",
     )
     parser.add_argument(
         "--batch-size", type=int, default=32, help="批量翻译大小（默认: 32）"
@@ -176,6 +222,9 @@ def main():
         dest="print_subtitle",
         action="store_true",
         help="在控制台打印字幕",
+    )
+    parser.add_argument(
+        "--no-preprocess", action="store_true", help="禁用音频降噪与预处理"
     )
 
     args = parser.parse_args()
@@ -197,7 +246,7 @@ def main():
         output_file = f"{base_name}.srt"
 
     print(f"\n{'=' * 60}")
-    print(f"  Whisper 字幕生成 Pro（本地翻译极速版）")
+    print(f"  Whisper 字幕生成 HD（高清晰度、高精度版）")
     print(f"{'=' * 60}")
     print(f"文件: {os.path.basename(input_file)}")
 
@@ -208,21 +257,24 @@ def main():
         duration = 0
         print(f"视频时长: 获取中...")
 
-    print(f"Whisper模型: large-v3-turbo")
-    print(f"设备: {args.device}")
-    print(f"计算类型: {args.compute_type}")
+    print(f"Whisper模型: {args.model}")
+    print(f"识别精度: beam_size=5 (高精度)")
     print(f"识别语言: {args.language if args.language else '自动检测'}")
     if args.translate:
-        print(f"翻译目标: {args.translate}")
-        print(
-            f"翻译引擎: {args.translator} {'(本地模型,极速)' if args.translator == 'local' else '(Google在线)'}"
-        )
-    if args.print_subtitle:
-        print(f"控制台输出: 开启")
+        print(f"翻译目标: {args.translate} ({args.translator})")
     print(f"{'=' * 60}\n")
 
+    # ========== 0. 音频预处理 ==========
+    audio_to_process = input_file
+    temp_audio = None
+    if not args.no_preprocess:
+        temp_audio = os.path.join(
+            tempfile.gettempdir(), f"whisper_clean_{int(time.time())}.wav"
+        )
+        audio_to_process = preprocess_audio(input_file, temp_audio)
+
     # ========== 1. 加载 Whisper 模型 ==========
-    print("加载 Whisper 模型中...")
+    print("\n加载 Whisper 模型中...")
     load_start = time.time()
 
     try:
@@ -231,38 +283,32 @@ def main():
         )
         device_info = "GPU/Metal" if args.device == "auto" else args.device
     except Exception as e:
-        print(f"加载失败，回退到 CPU: {e}")
+        print(f"加载失败，回退到 CPU (float32): {e}")
         model = WhisperModel(args.model, device="cpu", compute_type="float32")
         device_info = "CPU"
 
-    load_time = time.time() - load_start
-    print(f"Whisper 加载完成! 耗时: {load_time:.1f}秒, 设备: {device_info}")
+    print(
+        f"Whisper 加载完成! 耗时: {time.time() - load_start:.1f}秒, 设备: {device_info}"
+    )
 
-    # ========== 2. 预加载翻译模型（如果需要本地翻译）==========
-    if args.translate and args.translator == "local":
-        # 确定源语言
-        source_lang = args.language if args.language else "ja"
-        # 标准化目标语言
-        target_lang = args.translate.replace("-CN", "").replace("-TW", "").lower()
-
-        print(f"\n加载本地翻译模型 ({source_lang} -> {target_lang})...")
-        trans_load_start = time.time()
-        load_local_translator(source_lang, target_lang)
-        trans_load_time = time.time() - trans_load_start
-        print(f"翻译模型加载完成! 耗时: {trans_load_time:.1f}秒")
-
-    # ========== 3. 语音识别 ==========
+    # ========== 2. 语音识别 ==========
     language = args.language if args.language and args.language != "auto" else None
 
-    print("\n开始语音识别...")
+    print("\n开始高精度语音识别...")
     start_time = time.time()
 
+    # 高精度识别参数
     segments, info = model.transcribe(
-        input_file,
+        audio_to_process,
         language=language,
-        beam_size=1,
+        beam_size=5,  # 提升到 5，牺牲一点速度换取高准确率
+        temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),  # 温度回退，防止胡言乱语
+        condition_on_previous_text=False,  # 防止重复幻觉
         vad_filter=True,
-        vad_parameters=dict(min_silence_duration_ms=500),
+        vad_parameters=dict(
+            min_silence_duration_ms=500,
+            speech_pad_ms=400,  # 在语音前后多保留一点静音，防止吞字
+        ),
     )
 
     print(f"识别语言: {info.language} (概率: {info.language_probability:.2f})")
@@ -294,15 +340,17 @@ def main():
     print(f"\n识别完成! 耗时: {recognize_time:.1f}秒, 速度: {speed_ratio:.1f}x 实时")
     print(f"共 {len(segment_list)} 个片段")
 
-    # ========== 4. 翻译 ==========
+    # 清理临时音频文件
+    if temp_audio and os.path.exists(temp_audio):
+        os.remove(temp_audio)
+
+    # ========== 3. 翻译 ==========
     if args.translate and len(segment_list) > 0:
         print(f"\n开始翻译 ({args.translator})...")
         translate_start = time.time()
-
         texts = [s["text"] for s in segment_list]
 
         if args.translator == "local":
-            # 本地模型批量翻译
             source_lang = (
                 info.language
                 if info.language
@@ -310,7 +358,6 @@ def main():
             )
             target_lang = args.translate.replace("-CN", "").replace("-TW", "").lower()
 
-            # 分批处理
             batch_size = args.batch_size
             total_batches = (len(texts) + batch_size - 1) // batch_size
             translated_texts = []
@@ -325,25 +372,22 @@ def main():
                         if results:
                             translated_texts.extend(results)
                         else:
-                            # 本地模型不支持，回退到 Google
                             google_results = translate_google_batch(
                                 batch, args.translate, batch_size
                             )
                             translated_texts.extend(google_results)
                     except Exception as e:
-                        print(f"\n本地翻译出错: {e}，回退到 Google...")
+                        print(f"\n本地翻译出错，回退到 Google...")
                         google_results = translate_google_batch(
                             batch, args.translate, batch_size
                         )
                         translated_texts.extend(google_results)
                     pbar.update(1)
 
-            # 更新字幕文本
             for i, text in enumerate(translated_texts):
                 if i < len(segment_list):
                     segment_list[i]["text"] = text
         else:
-            # Google 批量翻译
             total_batches = (len(texts) + args.batch_size - 1) // args.batch_size
             translated_texts = []
 
@@ -360,13 +404,10 @@ def main():
                 if i < len(segment_list):
                     segment_list[i]["text"] = text
 
-        translate_time = time.time() - translate_start
-        print(f"翻译完成! 耗时: {translate_time:.1f}秒")
+        print(f"翻译完成! 耗时: {time.time() - translate_start:.1f}秒")
 
-    # ========== 5. 生成字幕文件 ==========
+    # ========== 4. 生成字幕文件 ==========
     print("\n生成字幕文件...")
-    gen_start = time.time()
-
     srt_content = []
     for i, segment in enumerate(segment_list, 1):
         start = seconds_to_srt_time(segment["start"])
@@ -380,16 +421,12 @@ def main():
     with open(output_file, "w", encoding="utf-8") as f:
         f.write("\n".join(srt_content))
 
-    gen_time = time.time() - gen_start
-    print(f"字幕生成完成! 耗时: {gen_time:.2f}秒")
-
-    # ========== 6. 完成 ==========
+    # ========== 5. 完成 ==========
     total_time = time.time() - start_time
     print(f"\n{'=' * 60}")
     print(f"  完成!")
     print(f"  字幕文件: {output_file}")
     print(f"  总耗时: {total_time:.1f}秒 ({total_time / 60:.1f}分钟)")
-    print(f"  处理速度: {speed_ratio:.1f}x 实时")
     print(f"{'=' * 60}")
 
 

@@ -37,6 +37,7 @@ python webui.py --share
 | `whisper_subtitle_gpu.py` | GPU加速版 | 速度快 |
 | `whisper_subtitle_turbo.py` | 极速版 | large-v3-turbo + 批量翻译 |
 | `whisper_subtitle_pro.py` | Pro版 | 本地翻译模型，无网络延迟 |
+| `whisper_subtitle_hd.py` | HD高清版 | 包含音频清洗与高精度解码 |
 | `merge_subtitle.py` | 字幕合并 | 将字幕硬编码到视频 |
 
 ---
@@ -229,7 +230,30 @@ python whisper_subtitle_pro.py "/path/to/video.mp4" -d /output/dir -l ja -t zh -
 
 ---
 
-## 5. merge_subtitle.py（字幕合并视频）
+## 5. whisper_subtitle_hd.py（HD 高清增强版）
+
+专注于**最高准确率**和**声音清晰度**。通过 FFmpeg 对音频进行降噪、音量标准化处理，并使用 Whisper 最高精度参数进行解码。
+
+### 使用方法
+
+```bash
+# 默认使用高精度处理
+python whisper_subtitle_hd.py "/path/to/video.mp4" -d /output/dir -t zh-CN -p
+
+# 关闭音频增强预处理（仅保留高精度解码）
+python whisper_subtitle_hd.py "/path/to/video.mp4" --no-preprocess
+```
+
+### 参数说明
+
+新增参数：
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--no-preprocess` | 禁用音频降噪与预处理 | 否 |
+
+---
+
+## 6. merge_subtitle.py（字幕合并视频）
 
 将 SRT 字幕硬编码到视频中，生成带字幕的新视频。
 
