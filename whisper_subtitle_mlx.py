@@ -213,10 +213,16 @@ def main():
     # --- MLX Whisper 识别 ---
     print(f"\n🚀 开始 MLX 识别 (模型: {args.model})...")
     rec_start_time = time.time()
+
+    # 如果用户输入 'auto'，则将其转换为 None 以便 mlx_whisper 进行自动检测
+    rec_language = (
+        args.language if args.language and args.language.lower() != "auto" else None
+    )
+
     result = mlx_whisper.transcribe(
         audio=audio_to_process,
         path_or_hf_repo=args.model,
-        language=args.language,
+        language=rec_language,
         verbose=True,  # MLX 自带 TQDM 进度条
     )
     rec_time = time.time() - rec_start_time

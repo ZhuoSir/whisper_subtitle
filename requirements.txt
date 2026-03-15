@@ -22,4 +22,5 @@ numpy>=1.24.0
 
 # 网络
 httpx[socks]>=0.27.0
-socksio>=1.0.0
+# Apple Silicon 专属
+mlx-whisper>=0.4.3
